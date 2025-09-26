@@ -1,3 +1,23 @@
+## Install
+
+```bash
+uv venv --python=3.11
+source .venv/bin/activate 
+uv pip install -r requirements.txt
+
+uv pip install flash-attn --no-build-isolation
+```
+
+## Download checkpoint 
+
+Check the doc to put the `pretrained_models` under `pretrained_models/23-51-11/model_best_bp2.pth`
+
+## Run
+```bash
+python scripts/run_demo.py --left_file ./isaac/left.png --right_file ./isaac/right.png --ckpt_dir ./pretrained_models/23-51-11/model_best_bp2.pth --out_dir ./test_outputs/ --intrinsic_file ./isaac/K.txt
+```
+
+
 # FoundationStereo: Zero-Shot Stereo Matching
 
 This is the official implementation of our paper accepted by CVPR 2025 Oral (**Best Paper Nomination**)
