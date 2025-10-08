@@ -22,6 +22,56 @@ from Utils import *
 from core.foundation_stereo import *
 
 
+class SAM6DClient:
+  def __init__(self, host='localhost', port=8000):
+    self.host = host
+    self.port = port
+    self.socket = None
+
+  def connect(self):
+    """Connect to the SAM-6D server"""
+    try:
+      self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+      self.socket.connect((self.host, self.port))
+      logging.info(f"Connected to SAM-6D server at {self.host}:{self.port}")
+      return True
+    except Exception as e:
+      logging.error(f"Failed to connect to server: {str(e)}")
+      return False
+
+  def send_data(self, data):
+    """Send data to the server"""
+    serialized = pickle.dumps(data)
+    length = struct.pack('!I', len(serialized))
+    self.socket.sendall(length + serialized)
+
+  def receive_data(self):
+    """Receive data from the server"""
+    # First, receive the length of the message
+    length_data = b''
+    while len(length_data) < 4:
+      chunk = self.socket.recv(4 - len(length_data))
+      if not chunk:
+        raise ConnectionError("Connection closed")
+      length_data += chunk
+
+    length = struct.unpack('!I', length_data)[0]
+
+    # Now receive the actual data
+    data = b''
+    while len(data) < length:
+      chunk = self.socket.recv(length - len(data))
+      if not chunk:
+        raise ConnectionError("Connection closed")
+      data += chunk
+
+    return pickle.loads(data)
+
+  def disconnect(self):
+    """Disconnect from the server"""
+    if self.socket:
+      self.socket.close()
+
 def receive_image(connection, address):
   print(f"Connection from {address} has been established!")
 
@@ -87,26 +137,33 @@ def start_server(args, model, host='0.0.0.0', port=12345):
     K = np.array(list(map(float, lines[0].rstrip().split()))).astype(np.float32).reshape(3, 3)
     baseline = float(lines[1])
 
-  # create sam6d client
-
+  sam6d_client = SAM6DClient()
+  sam6d_client.connect()
+  connection, address = server_socket.accept()
   while True:
-    connection, address = server_socket.accept()
     img0, img1 = receive_images(connection, address)
-    depth_img = run_inference(img0, img1, baseline K, model, args)
+    depth_img = run_inference(img0, img1, baseline, K, model, args)
 
     # create request compress
-    # send images over sam6d client
-    # receive json info
+    request = {
+      'action': 'sam6d_inference',
+      'rgb_bytes': img0,
+      'depth_bytes': depth_img,
+      'det_score_thresh': 0.5,
+      'visualize': False
+    }
+    sam6d_client.send_data(request)
+    response = sam6d_client.receive_data()
 
     # server_socket send size
-    # server_socket.sendall(json info)
+    server_socket.send(struct.pack('!I', len(response)))
+    server_socket.sendall(response)
 
 if __name__=="__main__":
   code_dir = os.path.dirname(os.path.realpath(__file__))
   parser = argparse.ArgumentParser()
   parser.add_argument('--intrinsic_file', default=f'{code_dir}/../assets/K.txt', type=str, help='camera intrinsic matrix and baseline file')
   parser.add_argument('--ckpt_dir', default=f'{code_dir}/../pretrained_models/11-33-40/model_best_bp2.pth', type=str, help='pretrained model path')
-  parser.add_argument('--out_dir', default=f'{code_dir}/../output/', type=str, help='the directory to save results')
   parser.add_argument('--scale', default=1, type=float, help='downsize the image by scale, must be <=1')
   parser.add_argument('--hiera', default=0, type=int, help='hierarchical inference (only needed for high-resolution images (>1K))')
   parser.add_argument('--z_far', default=10, type=float, help='max depth to clip in point cloud')
@@ -145,4 +202,4 @@ if __name__=="__main__":
   scale = args.scale
   assert scale<=1, "scale must be <=1"
 
-  start_server()
+  start_server(args, model)
